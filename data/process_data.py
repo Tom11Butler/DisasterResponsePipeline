@@ -25,6 +25,7 @@ def load_data(messages_filepath, categories_filepath):
     
     # merge the data set
     df = pd.merge(messages, categories, how='inner', on='id', left_index=True)
+    df = df.drop(labels=['id'], axis=1)
     
     # return this dataframe
     return df
@@ -48,7 +49,7 @@ def clean_data(df):
     '''
     
     # create a dataframe of the 36 individual category columns
-    categories = df.set_index('id')['categories'].str.split(';', expand=True)
+    categories = df['categories'].str.split(';', expand=True)
     
     # select the first row of the categories dataframe
     row = categories.iloc[0]
@@ -67,22 +68,22 @@ def clean_data(df):
         categories[column] = pd.to_numeric(categories[column])
        
     # drop the original categories column from `df`
-    df.drop(labels='categories', axis=1, inplace=True)  
+    df = df.drop(labels='categories', axis=1)  
     
     # concatenate the original dataframe with the new `categories` dataframe
     df = pd.concat([df, categories], axis=1)
     
     # drop duplicates
-    df.drop_duplicates(inplace=True)
+    df = df.drop_duplicates()
     
     # drop any rows where the message is null
-    df = df.dropna(how='any', subset=['message'])
+    #df = df.dropna(how='any', subset=['message'])
     
     # fill all null values with a zero
     df = df.fillna(value=0)
     
-    # reset the index, no need for none-monotonic increasing index
-    df = df.reset_index().drop('index', axis=1)
+    # only take the rows where 'related'=1.0 or 0.0
+    df = df[(df['related']==0.0) | (df['related']==1.0)]
     
     return df
 
@@ -137,7 +138,7 @@ def main():
               'well as the filepath of the database to save the cleaned data '\
               'to as the third argument. \n\nExample: python process_data.py '\
               'disaster_messages.csv disaster_categories.csv '\
-              'DisasterResponse.db')
+              'DisasterResponse')
 
 
 if __name__ == '__main__':
