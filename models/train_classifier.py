@@ -17,11 +17,12 @@ import pickle
 from sqlalchemy import create_engine
 import re
 import nltk
-from nltk.tokenize import word_tokenize
+from nltk.tokenize import word_tokenize, sent_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
 from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.metrics import classification_report, f1_score, precision_score, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, f1_score, precision_score
+from sklearn.metrics import make_scorer, confusion_matrix, accuracy_score
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -48,7 +49,7 @@ def load_data(database_filepath):
     engine = create_engine('sqlite:///' + database_filepath)
     df = pd.read_sql_table('DisasterResponse', engine)
     X = df['message']
-    Y = df.iloc[:,4:]
+    Y = df.drop(labels=['original','message','genre'], axis=1)
     category_names = Y.columns
     
     return X, Y, category_names
@@ -69,22 +70,19 @@ def tokenize(text):
     Lemmatises each word, set to lower case and remove white space
     '''
     
+    # remove the URLs
     url_regex = 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     detected_urls = re.findall(url_regex, text)
     for url in detected_urls:
-        # replace urls with a placeholder so we know if link is in message
         text = text.replace(url, "urlplaceholder")
-        
-    # separates text into a list of words
-    tokens = word_tokenize(text)
-    # reduces words to base version
-    lemmatizer = WordNetLemmatizer()
+    
+    # normalize case and remove punctuation
+    text = re.sub(r"[^a-zA-Z0-9]", " ", text.lower())
 
-    # lemmatise words, set to lower case, strip of white space
-    clean_tokens = []
-    for tok in tokens:
-        clean_tok = lemmatizer.lemmatize(tok).lower().strip()
-        clean_tokens.append(clean_tok)
+    words = word_tokenize(text)
+
+    clean_tokens = [WordNetLemmatizer().lemmatize(w).strip() for w in words
+                    if w not in stopwords.words("english")]
 
     return clean_tokens
 
@@ -100,6 +98,10 @@ class StartingVerbExtractor(BaseEstimator, TransformerMixin):
         sentence_list = nltk.sent_tokenize(text)
         for sentence in sentence_list:
             pos_tags = nltk.pos_tag(tokenize(sentence))
+            
+            if len(pos_tags)==0:
+                return False
+            
             first_word, first_tag = pos_tags[0]
             if first_tag in ['VB', 'VBP'] or first_word == 'RT':
                 return True
@@ -125,6 +127,7 @@ def build_model():
     Functionality:
     
     '''
+    
     pipeline = Pipeline([
         ('features', FeatureUnion([
             ('text_pipeline', Pipeline([
@@ -135,7 +138,7 @@ def build_model():
             ('starting_verb', StartingVerbExtractor())
         ])),
 
-        ('clf', MultiOutputClassifier(RandomForestClassifier()))
+        ('clf', MultiOutputClassifier(RandomForestClassifier(random_state=42)))
 
     ])
     
@@ -143,8 +146,10 @@ def build_model():
         'features__text_pipeline__vect__ngram_range': ((1, 1), (1, 2)),
         'clf__estimator__n_estimators': [10, 50]
     }
+    
+    scorer = make_scorer(f1_score, average='micro')
 
-    model = GridSearchCV(pipeline, param_grid=parameters)
+    model = GridSearchCV(pipeline, param_grid=parameters, scoring=scorer)
     
     return model
 
